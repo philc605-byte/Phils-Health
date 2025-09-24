@@ -3,42 +3,68 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Load dataset
-@st.cache_data
-def load_data():
-    df = pd.read_csv("MegaDataset_v2_Nov2024_onward.csv", parse_dates=["Date"])
-    return df
+st.set_page_config(page_title="Phil's Health Dashboard", layout="wide")
 
-df = load_data()
+def load_default_csv():
+    try:
+        df = pd.read_csv("MegaDataset_v2_Nov2024_onward.csv", parse_dates=["Date"])
+        return df
+    except Exception as e:
+        st.info("Couldn't auto-load MegaDataset_v2_Nov2024_onward.csv. Upload the CSV below.")
+        st.caption(f"Loader message: {e}")
+        return None
 
 st.title("Phil's Health Dashboard")
-st.markdown("### Integrated RENPHO, Blood Pressure, and Bloods (Nov 2024 → present)")
+st.markdown("Integrated RENPHO • Blood Pressure • Bloods (Nov 2024 → present)")
+
+# Try to load default file, else allow upload
+df = load_default_csv()
+uploaded = st.file_uploader("Optional: Upload MegaDataset_v2_Nov2024_onward.csv", type=["csv"])
+if uploaded is not None:
+    try:
+        df = pd.read_csv(uploaded, parse_dates=["Date"])
+        st.success("CSV loaded from upload.")
+    except Exception as e:
+        st.error(f"Upload failed: {e}")
+
+if df is None:
+    st.stop()
 
 # Sidebar filters
 st.sidebar.header("Filters")
 min_date, max_date = df["Date"].min(), df["Date"].max()
-date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
+date_range = st.sidebar.date_input("Date range", [min_date, max_date], min_value=min_date, max_value=max_date)
 if len(date_range) == 2:
     start_date, end_date = date_range
     df = df[(df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))]
 
-# Tabs for different categories
-tabs = st.tabs(["Weight & Body Comp", "Blood Pressure", "Hormones", "FBC", "Lipids", "Vitamins & Others"])
+# Helper to safely pick only existing columns
+def existing(cols):
+    return [c for c in cols if c in df.columns]
+
+tabs = st.tabs(["Weight & Body Comp", "Blood Pressure", "Hormones", "FBC", "Lipids", "Vitamins & Others", "Raw Table"])
 
 with tabs[0]:
     st.subheader("Weight & Body Composition")
     if "Weight_kg" in df.columns:
-        fig = px.line(df, x="Date", y="Weight_kg", title="Weight (kg) over Time")
+        st.metric("Latest weight (kg)", f"{df['Weight_kg'].dropna().iloc[-1]:.2f}" if df['Weight_kg'].notna().any() else "—")
+        fig = px.line(df, x="Date", y="Weight_kg", title="Weight (kg)")
         st.plotly_chart(fig, use_container_width=True)
-    if "RENPHO_BodyFat_pct" in df.columns:
-        fig = px.line(df, x="Date", y=["RENPHO_BodyFat_pct", "RENPHO_BodyFat_pct_corrected"],
-                      title="Body Fat % (Raw vs Corrected)")
+    cols = existing(["RENPHO_BodyFat_pct", "RENPHO_BodyFat_pct_corrected"])
+    if cols:
+        fig = px.line(df, x="Date", y=cols, title="Body Fat % (Raw/Corrected)")
+        st.plotly_chart(fig, use_container_width=True)
+    lean_cols = existing(["RENPHO_LeanMass_st"])
+    if lean_cols:
+        st.caption("Lean mass shown in stones; convert to kg by × 6.35029.")
+        fig = px.line(df, x="Date", y=lean_cols, title="Lean Mass (st)")
         st.plotly_chart(fig, use_container_width=True)
 
 with tabs[1]:
     st.subheader("Blood Pressure")
-    if "BP_Systolic" in df.columns:
-        fig = px.line(df, x="Date", y=["BP_Systolic", "BP_Diastolic"], title="Blood Pressure (Sys/Dia)")
+    bp_cols = existing(["BP_Systolic", "BP_Diastolic"])
+    if bp_cols:
+        fig = px.line(df, x="Date", y=bp_cols, title="Blood Pressure (Sys/Dia)")
         st.plotly_chart(fig, use_container_width=True)
     if "BP_Pulse" in df.columns:
         fig = px.line(df, x="Date", y="BP_Pulse", title="Pulse (bpm)")
@@ -46,32 +72,32 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("Hormones")
-    hormone_cols = [c for c in df.columns if c.startswith("Hormone_")]
-    if hormone_cols:
-        fig = px.line(df, x="Date", y=hormone_cols, title="Hormone Trends")
+    h_cols = [c for c in df.columns if c.startswith("Hormone_")]
+    if h_cols:
+        fig = px.line(df, x="Date", y=h_cols, title="Hormone Trends")
         st.plotly_chart(fig, use_container_width=True)
 
 with tabs[3]:
     st.subheader("Full Blood Count")
-    fbc_cols = [c for c in df.columns if c.startswith("FBC_")]
-    if fbc_cols:
-        fig = px.line(df, x="Date", y=fbc_cols, title="FBC Trends")
+    f_cols = [c for c in df.columns if c.startswith("FBC_")]
+    if f_cols:
+        fig = px.line(df, x="Date", y=f_cols, title="FBC Trends")
         st.plotly_chart(fig, use_container_width=True)
 
 with tabs[4]:
     st.subheader("Lipids")
-    lipid_cols = [c for c in df.columns if c.startswith("Lipid_")]
-    if lipid_cols:
-        fig = px.line(df, x="Date", y=lipid_cols, title="Lipid Trends")
+    l_cols = [c for c in df.columns if c.startswith("Lipid_")]
+    if l_cols:
+        fig = px.line(df, x="Date", y=l_cols, title="Lipid Trends")
         st.plotly_chart(fig, use_container_width=True)
 
 with tabs[5]:
     st.subheader("Vitamins & Others")
-    vitamin_cols = [c for c in df.columns if c.startswith("Vitamin_")] + ["PSA", "TSH"]
-    vitamin_cols = [c for c in vitamin_cols if c in df.columns]
-    if vitamin_cols:
-        fig = px.line(df, x="Date", y=vitamin_cols, title="Vitamins & Other Markers")
+    v_cols = existing([c for c in df.columns if c.startswith("Vitamin_")] + ["PSA","TSH"])
+    if v_cols:
+        fig = px.line(df, x="Date", y=v_cols, title="Vitamins & Other Markers")
         st.plotly_chart(fig, use_container_width=True)
 
-st.sidebar.markdown("---")
-st.sidebar.write("Context flags are included in the dataset (see 'Context' column).")
+with tabs[6]:
+    st.subheader("Raw Data")
+    st.dataframe(df.sort_values("Date"))
